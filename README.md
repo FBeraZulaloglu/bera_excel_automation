@@ -149,3 +149,13 @@ For support, please open an issue in the repository or contact [your-email@examp
 - [ ] Add export options for results
 - [ ] Include template system for custom prompts
 - [ ] Add user authentication
+
+## USAGE
+
+### GET OPEN API KEY
+
+Visit this link:
+https://platform.openai.com/api-keys
+
+Create new API key
+Copy and paste

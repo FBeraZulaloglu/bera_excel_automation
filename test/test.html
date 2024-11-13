@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -6,11 +7,14 @@
     <title>Excel GPT Processor</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Add Excel reading library -->
-    <script src="https://unpkg.com/xlsx/dist/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <!-- Add Excel styling library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.3.0/exceljs.min.js"></script>
+    <script src="config.js"></script>
 </head>
 <body class="bg-gray-100 min-h-screen p-8">
     <div class="max-w-4xl mx-auto">
-        <h1 class="text-3xl font-bold mb-8 text-center text-gray-800">Excel GPT Processor</h1>
+        <h1 class="text-3xl font-bold mb-8 text-center text-gray-800">Marka İzleme ve Filtreleme</h1>
         
         <!-- Upload Form -->
         <div class="bg-white p-6 rounded-lg shadow-md mb-8">
@@ -19,20 +23,50 @@
                     <input type="file" id="fileInput" accept=".xlsx,.xls" class="hidden">
                     <label for="fileInput" class="cursor-pointer">
                         <div class="text-gray-600">
-                            <p class="mb-2">Drop your Excel file here or click to upload</p>
-                            <p class="text-sm text-gray-500">Supports .xlsx and .xls files</p>
+                            <p class="mb-2">Excel dosyanızı buraya sürükleyerek yükleyebilirsiniz</p>
+                            <p class="text-sm text-gray-500">.xlsx ve .xls dosya uzantısı olduğuna dikkat edin!</p>
                         </div>
                     </label>
                 </div>
+
+                <div class="flex space-x-4">
+                    <div class="flex-1">
+                        <label for="rowCount" class="block text-sm font-medium text-gray-700 mb-1">
+                            İşlenecek Satır Sayısı
+                        </label>
+                        <select id="rowCount" 
+                                class="w-full p-2 border rounded-lg bg-white"
+                                required>
+                            
+                            <option value="10">10 Satır</option>
+                            <option value="20">20 Satır</option>
+                            <option value="100">100 Satır</option>
+                            <option value="1000">1000 Satır</option>
+                            <option value="1000">10000 Satır</option>
+                            <option value="1000">20000 Satır</option>
+                            <option value="ALL">Tüm Satırlar</option>
+                        </select>
+                    </div>
+                </div>
+
+                <p id="fileNameDisplay" class="text-green-600 mt-2"></p>
                 <div class="space-y-2">
-                    <input type="text" 
+                    <input type="password" 
                            id="apiKey" 
-                           placeholder="Enter your OpenAI API key" 
+                           placeholder="OpenAI API key girişi şimdilik yapıldı (SONRA bu kısım değiştirilebilir)!" 
                            class="w-full p-2 border rounded-lg"
+                           value=config.apiKey
                            required>
                     <button type="submit" class="w-full bg-blue-500 text-white py-2 rounded-lg hover:bg-blue-600 transition-colors">
-                        Process File
+                        Markaları Karşılaştır<img src="" alt="" sizes="" srcset="">
                     </button>
+
+                    <div id="downloadSection" class="mt-4 text-center hidden">
+                        <button id="downloadExcel" class="bg-green-500 text-white py-2 px-4 rounded-lg hover:bg-green-600 transition-colors">
+                            Excel Dosyasını İndir
+                        </button>
+                    </div>
+                    
                 </div>
             </form>
         </div>
@@ -41,7 +75,7 @@
         <div id="loading" class="hidden">
             <div class="flex items-center justify-center space-x-2">
                 <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
-                <p class="text-gray-600">Processing your file...</p>
+                <p class="text-gray-600" id="loadingText">Dosya yükleniyor</p>
             </div>
         </div>
 
@@ -53,7 +87,50 @@
     </div>
 
     <script>
+        let filtered_data = [] // Our results that will be written in new excel sheet will be here
+
+        document.addEventListener('DOMContentLoaded', function() {
+            const apiKeyInput = document.getElementById('apiKey');
+            
+            // If config.js is loaded and has an API key, set it
+            if (typeof config !== 'undefined' && config.apiKey) {
+                apiKeyInput.value = config.apiKey;
+            }
+
+            // Optional: Mask the API key display
+            apiKeyInput.addEventListener('focus', function() {
+                // Show actual value when focused
+                this.type = 'text';
+            });
+            
+            apiKeyInput.addEventListener('blur', function() {
+                // Mask when not focused
+                if (this.value) {
+                    this.type = 'password';
+                }
+            });
+        
+        });
+
+        function getApiKey() {
+            return document.getElementById('apiKey').value;
+        }
+
+        document.getElementById('fileInput').addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            const fileNameDisplay = document.getElementById('fileNameDisplay');
+
+            if (file) {
+                fileNameDisplay.textContent = `Yüklenen dosya: ${file.name}`;
+            } else {
+                fileNameDisplay.textContent = ''; // Clear if no file is selected
+            }
+        });
+
         async function processWithGPT(text, apiKey) {
+
+            const sanitizedText = text.replace(/[^\x00-\x7F]\./g, "").trim();
+
             const response = await fetch('https://api.openai.com/v1/chat/completions', {
                 method: 'POST',
                 headers: {
@@ -61,21 +138,71 @@
                     'Authorization': `Bearer ${apiKey}`
                 },
                 body: JSON.stringify({
-                    model: "gpt-3.5-turbo",
+                    model: "gpt-4o-mini",
+                    temperature: 0.3,
                     messages: [
                         {
                             role: "system",
-                            content: "You are a helpful assistant processing Excel data."
-                        },
+                            content: `# Role
+                                        Act as a brand similarity and differentiation analysis expert. Use just english words!
+
+                                        # Task
+                                        Evaluate the similarity between two brands and identify the factors that help a brand differentiate itself from others. Provide a similarity rating based on the analysis, choosing from the options: High, Medium-High, Medium, Low, Medium-Low. It's crucial to adhere strictly to these ratings to ensure accuracy and consistency in the evaluation process.
+
+                                        ## Specifics
+                                        - Focus solely on the criteria provided for brand similarity and differentiation.
+                                        - Your analysis should be concise and directly reflect the criteria outlined, without deviation.
+                                        - Only provide one of the specified five ratings as your response to any query.
+                                        - Do not include any additional text or explanation in your output.
+
+                                        ## Knowledge: Brand Differentiation Factors
+                                        Utilize the provided knowledge base to evaluate the distinctiveness of a given brand. This includes analyzing the brand's unique qualities, visual and phonetic elements, representation, integrity, positioning, and usage in the market.
+
+                                        ### Task 1: Brand Similarity Analysis
+                                        For each pair of brands provided, evaluate their similarity based on the criteria of phonetic similarity, visual similarity, and meaning. Return only one of the specified five ratings based on your analysis.
+
+                                        Output: Choose and return only one of the following ratings based on your analysis:
+                                        - High (similarity >75%)
+                                        - Medium-High (similarity 55-75%)
+                                        - Medium (similarity 35-55%)
+                                        - Medium-Low (similarity 15-35%)
+                                        - Low (similarity <15%)
+
+                                        # Examples
+                                        - Input: "blk" | "bl bilek logistics"  
+                                        Output: High
+
+                                        - Input: "yonca" | "tonca fish"  
+                                        Output: Medium-High
+
+                                        - Input: "yeşil" | "yeşilyurt dondurmacısı"  
+                                        Output: Medium-High
+
+                                        - Input: "ant bilişim" | "aod altın oto döşeme"  
+                                        Output: Low
+
+                                        - Input: "avesta lorin" | "alesta seaside residence"  
+                                        Output: Medium
+
+                                        # Notes
+                                        - Ensure your analysis is strictly based on the provided criteria without incorporating external knowledge or assumptions.
+                                        - Maintain objectivity in your evaluation, focusing solely on the information provided in the knowledge base.
+                                        - Avoid adding any additional words, explanations, or justifications to your output. Your response should only include one of the five specified ratings.
+                                        - Remember, accuracy in following these instructions is critical to the success of the task and the reliability of the analysis provided.`
+                            },
                         {
                             role: "user",
-                            content: `Please analyze this data: ${text}`
+                            content: `INPUT: ${sanitizedText}`
                         }
                     ]
                 })
             });
+            if (!response.ok) {
+                throw new Error(`API Error: ${response.status} ${response.statusText}`);
+            }
 
             const data = await response.json();
+            //console.log("OpenAI API Response:", data);
             return data.choices[0].message.content;
         }
 
@@ -88,18 +215,77 @@
                         const workbook = XLSX.read(data, { type: 'array' });
                         
                         // Get first sheet
-                        const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+                        let rows_to_proceed;
                         
-                        // Convert to JSON
+                        const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
                         const jsonData = XLSX.utils.sheet_to_json(firstSheet);
                         
+                        if (jsonData.length === 0) {
+                            throw new Error('No data found in the Excel sheet');
+                        }
+                        
+                        const totalRows = jsonData.length;
+                        const rowCountSelect = document.getElementById('rowCount').value;
+                        //console.log("SELECTED ROW COUNT: ",rowCountSelect)
+                        let processedRows = 0;
+
+                        if (rowCountSelect === 'ALL') {
+                            rows_to_proceed = jsonData;
+                        } 
+                        else {
+                            const endRow = parseInt(rowCountSelect);
+                            //console.log("LAST ROW COUNT: ", endRow)
+                            rows_to_proceed = jsonData.slice(0, endRow);
+                        }
+                        //console.log("ROWS TO PROCEED")
+                        //console.log(rows_to_proceed)
+                        
+                        // CREATE NEW EXCEL FILE TO PUT JUST SIMILAR BRAND NAMES
                         const results = [];
-                        for (let [index, row] of jsonData.entries()) {
+                        let similar_brands = [] // this will be updated with the change of brand!
+
+                        for (let [index, row] of rows_to_proceed.entries()) {
+
+                            //console.log(row)
+                            //console.log(row["İzlenecek Kelime"])
+                            //console.log(row["Marka Adı"])
+                            // Create new workbook
+
                             const rowText = Object.entries(row)
                                 .map(([key, value]) => `${key}: ${value}`)
                                 .join(" | ");
                             
-                            const gptResponse = await processWithGPT(rowText, apiKey);
+                            input_text = row["İzlenecek Kelime"] + "|" + row["Marka Adı"]
+                            //console.log(input_text)
+
+                            // Update progress
+                            processedRows++;
+                            const percentage = Math.round((processedRows / totalRows) * 100);
+                            document.getElementById('loadingText').textContent = `Markalar taranıyor... ${index}/${rows_to_proceed.length}`;
+                            
+                            
+                            const gptResponse = await processWithGPT(input_text, apiKey);
+                            if(row["Benzerlik"].toString().includes("%")){
+                                // Burası markaların kontrol edildiği yer yüksek geldiğse değer eklencek!
+
+                                if(gptResponse.toString().toLowerCase().includes("high")){
+                                    similar_brands.push({data:row,rowColor:"-",textColor:"-"})
+                                }
+                                else{
+                                    //console.log("BENZER DEĞİL: ",row)
+                                }
+                            }
+                            else{
+                                if(similar_brands.length > 1){
+                                    filtered_data.push([...similar_brands]) 
+                                    console.log("Filtered Data")
+                                    console.log(filtered_data)
+                                }
+                                console.log("Similar Brands")
+                                console.log(similar_brands)
+                                similar_brands = [] // clear the brand list
+                                similar_brands.push({data:row,rowColor:"0000FF",textColor:"FFFFFFFF"})
+                            }
                             
                             results.push({
                                 row_number: index + 1,
@@ -107,16 +293,124 @@
                                 gpt_response: gptResponse
                             });
                         }
+                        if(similar_brands.length > 1){
+                            filtered_data.push([...similar_brands])
+                            similar_brands = []; 
+                        }
                         
-                        resolve(results);
+                        // Include metadata about processing
+                        resolve({
+                            results: results,
+                            metadata: {
+                                totalRows: totalRows,
+                                processedRows: results.length,
+                                remainingRows: totalRows - results.length
+                            }
+                        });
                     } catch (error) {
                         reject(error);
                     }
                 };
-                reader.onerror = error => reject(error);
+                reader.onerror = error => reject(new Error('Error reading file: ' + error));
                 reader.readAsArrayBuffer(file);
             });
         }
+
+        document.getElementById('downloadExcel').addEventListener('click', (e) =>{
+            e.preventDefault();
+            
+            const newWorkbook = XLSX.utils.book_new();
+            // Convert filtered_data to format suitable for Excel
+            console.log("FILTERED DATA TO WRITE")
+            console.log(filtered_data)
+
+            const excelData = filtered_data.map(group => {
+                return group.map(item => {
+                    item.backgroundColor = '#E3F2FD';
+                    return {
+                        'İzlenecek Kelime': item.data['İzlenecek Kelime'],
+                        'Marka Adı': item.data['Marka Adı'],
+                        'Firma': item.data['Firma'],
+                        'Başvuru No': item.data['Başvuru No'],
+                        'Sınıf': item.data['Sınıf'],
+                        'Benzerlik': item.data['Benzerlik'],
+                        'rowColor':item.rowColor,
+                        'textColor':item.textColor
+                        // You can add more fields from item.data as needed
+                    };
+                });
+            }).flat(); // Flatten the array of arrays into a single array
+
+            if (excelData.length > 0) {
+                try {
+                    const workbook = new ExcelJS.Workbook();
+                    const worksheet = workbook.addWorksheet('Similar Brands');
+
+                    const headers = Object.keys(excelData[0]);
+                    worksheet.columns = headers.map(header => ({ header, key: header }));
+                    // Style header row
+                    worksheet.getRow(1).eachCell(cell => {
+                        cell.font = { color: { argb: 'FFFFFFFF' } ,bold: true };
+                        cell.fill = {
+                            type: 'pattern',
+                            pattern: 'solid',
+                            fgColor: { argb: 'D3D3D3' } // Gray color
+                        };
+                    });
+
+                    excelData.forEach((item, index) => {
+
+                        const row = worksheet.addRow(item);
+                        const rowColor = item.rowColor; // Default to white if no color provided
+                        const textColor = item.textColor
+                        
+                        if(textColor != '-'){
+                            row.eachCell(cell => {
+                                cell.font = { color: { argb: textColor }, bold:true };
+                                cell.fill = {
+                                    type: 'pattern',
+                                    pattern: 'solid',
+                                    fgColor: { argb: rowColor }
+                                    };
+                                });
+                        }
+                    });
+
+                    // Remove the color and text_color
+                    const totalColumns = worksheet.columnCount; 
+                    worksheet.spliceColumns(totalColumns - 1, 2);
+                    
+                    // Export the Excel file
+                    workbook.xlsx.writeBuffer().then(buffer => {
+                        const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+                        const url = URL.createObjectURL(blob);
+                        const link = document.createElement("a");
+                        link.href = url;
+                        link.download = 'similar_brands.xlsx';
+                        link.click();
+                        URL.revokeObjectURL(url); // Clean up the URL
+                        filtered_data = [] // remove all the data that is filtered!
+                    }).catch(error => {
+                        console.error("Error creating Excel file:", error);
+                        alert("Excel dosyası oluşurken bir sorunla karşılaştık. Lütfen tekrar deneyin!" + error.message);
+                    });
+                    
+                    //const worksheet = XLSX.utils.json_to_sheet(excelData);
+                    //XLSX.utils.book_append_sheet(newWorkbook, worksheet, 'Similar Brands');
+                    //XLSX.writeFile(newWorkbook, 'similar_brands.xlsx');
+                } catch (error) {
+                    console.error("Error creating Excel file:", error);
+                    alert("Excel dosyası oluşurken bir sorunla karşılaştık. Lütfen tekrar deneyin!" + error.message);
+                }
+            } else {
+                console.error("excelData is empty after processing");
+                alert("EXCEL dosyasına kaydedilecek herhangi bir marka bulunamadı!");
+            }
+        });
+        
+        // Show download button
+        document.getElementById('downloadSection').classList.remove('hidden');
+
 
         document.getElementById('uploadForm').addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -125,12 +419,12 @@
             const file = fileInput.files[0];
             
             if (!file) {
-                alert('Please select a file first.');
+                alert('Lütfen ilk önce bir dosya yükleyin!');
                 return;
             }
 
             if (!apiKey) {
-                alert('Please enter your OpenAI API key.');
+                alert('OpenAI API key girmeyi unutmayın!');
                 return;
             }
 
@@ -139,11 +433,20 @@
             document.getElementById('results').classList.add('hidden');
 
             try {
-                const results = await processExcelFile(file, apiKey);
-
+                const processedData = await processExcelFile(file, apiKey);
                 // Display results
                 const resultsContent = document.getElementById('resultsContent');
-                resultsContent.innerHTML = results.map(result => `
+                
+                resultsContent.innerHTML = `
+                    <div class="bg-blue-100 p-4 rounded-lg mb-4">
+                        <p class="font-semibold">File Summary:</p>
+                        <p>Toplam satır sayısı: ${processedData.metadata.totalRows}</p>
+                        <p>İzlenen satır sayısı: ${processedData.metadata.processedRows}</p>
+                        <p>İzlenmemiş satır sayısı: ${processedData.metadata.remainingRows}</p>
+                    </div>
+                `;
+
+                resultsContent.innerHTML += processedData.results.map(result => `
                     <div class="bg-white p-4 rounded-lg shadow-md">
                         <p class="font-semibold text-gray-700">Row ${result.row_number}</p>
                         <p class="text-sm text-gray-600 mt-2">${result.original_data}</p>
